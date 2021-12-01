@@ -33,8 +33,8 @@ pub struct Lexer {
 }
 
 impl Lexer {
-    const IDENT_BREAKERS: [char; 4] = [' ', '\n', '(', ')'];
-    const WHITESPACE: [char; 2] = [' ', '\n'];
+    const IDENT_BREAKERS: &'static [char] = &[' ', '\n', '(', ')', ':'];
+    const WHITESPACE: &'static [char] = &[' ', '\n'];
 
     /// Creates a new lexer for a source file
     #[inline]
@@ -60,59 +60,61 @@ impl Lexer {
     pub fn get_token(&mut self) -> Result<Token, LexicError> {
         self.token_range = 0..0;
         loop {
-            let current_c = if let Some(c) = self.getc() {
-                c
-            } else {
-                break Ok(Token::EOF);
-            };
+            let current_c = self.getc();
 
             match self.state.clone() {
                 State::Looking => match current_c {
-                    c if c.is_alphabetic() => {
+                    Some(c) if c.is_alphabetic() || c == '_' => {
                         self.state = State::AccIdent {
                             range: self.input_head..(self.input_head + c.len_utf8()),
                         };
                         self.advance();
                     }
-                    '(' => {
+                    Some('(') => {
                         self.token_range =
-                            self.input_head..(self.input_head + current_c.len_utf8());
+                            self.input_head..(self.input_head + '('.len_utf8());
                         self.state = State::Looking;
                         self.advance();
                         break Ok(Token::ParensOpen);
                     }
-                    ')' => {
+                    Some(')') => {
                         self.token_range =
-                            self.input_head..(self.input_head + current_c.len_utf8());
+                            self.input_head..(self.input_head + ')'.len_utf8());
                         self.state = State::Looking;
                         self.advance();
                         break Ok(Token::ParensClose);
                     }
-                    ':' => {
+                    Some(':') => {
                         self.token_range =
-                            self.input_head..(self.input_head + current_c.len_utf8());
+                            self.input_head..(self.input_head + ':'.len_utf8());
                         self.state = State::Looking;
                         self.advance();
                         break Ok(Token::Colon);
                     }
-                    c if Self::WHITESPACE.contains(&c) => {
+                    Some(c) if Self::WHITESPACE.contains(&c) => {
                         self.advance();
                     }
-                    _ => break Err(self.err_unexpected_char(current_c)),
+                    Some(c) => break Err(self.err_unexpected_char(c)),
+                    None => break Ok(Token::EOF),
                 },
                 State::AccIdent { range } => match current_c {
-                    c if c.is_alphanumeric() => {
+                    Some(c) if c.is_alphanumeric() || c == '_' => {
                         self.advance();
                         self.state = State::AccIdent {
                             range: range.start..self.input_head,
                         };
                     }
-                    c if Self::IDENT_BREAKERS.contains(&c) => {
+                    // Either an ident breaker or None (as None would unwrap or true)
+                    _ if current_c.map(|c| Self::IDENT_BREAKERS.contains(&c)).unwrap_or(true) => {
                         self.token_range = range;
                         self.state = State::Looking;
                         break Ok(Token::Identifier);
                     }
-                    _ => break Err(self.err_unexpected_char(current_c)),
+                    // I'm sure None would be matched by the above arm, but
+                    // rustc can't tell so we'll unwrap it here, it is Some
+                    // unexpected character for sure. The '\0' is here for
+                    // funsies.
+                    _ => break Err(self.err_unexpected_char(current_c.unwrap_or('\0'))),
                 },
             }
         }
@@ -220,14 +222,20 @@ impl Display for LexicError {
 mod tests {
     use super::*;
 
-    const GET_TOKEN_LIMIT: usize = 1000;
-
     #[test]
     fn simple_1() {
         let mut lexer = Lexer::new("input_examples/simple1.plr").unwrap();
-        for _ in 0..GET_TOKEN_LIMIT {
+        let expected_content = std::fs::read_to_string("util_files/test_data/lexer_output/simple1.plr.txt")
+            .unwrap();
+        for expected_line in expected_content.lines() {
             let tok = lexer.get_token().unwrap();
-            println!("{}", lexer.token_str());
+            let line = format!(
+                "{:?} \"{}\", starts at col: {}",
+                tok,
+                lexer.token_str(),
+                lexer.token_start_column()
+            );
+            assert_eq!(line, expected_line, "Wrong token parsing");
             if tok == Token::EOF {
                 break;
             }
