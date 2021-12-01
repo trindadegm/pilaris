@@ -1,0 +1,16 @@
+[package]
+name = "pilaris"
+version = "0.1.0"
+edition = "2021"
+license = "MIT / Apache-2.0"
+
+[lib]
+name = "pilaris"
+path = "src/lib.rs"
+
+[[bin]]
+name = "pilarisc"
+path = "src/executables/pilarisc.rs"
+
+[dependencies]
+log = "0.4"
